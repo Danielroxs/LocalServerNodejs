@@ -1,102 +1,44 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
+const { createClient } = require('@supabase/supabase-js'); // Importar el cliente de Supabase
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+
+require('dotenv').config();
+
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-// Conexión a la base de datos SQLite
-const db = new sqlite3.Database('./messages.db', (err) => {
-    if (err) {
-        console.error('Error al conectar con la base de datos:', err);
-    } else {
-        console.log('Conectado a la base de datos SQLite');
-    }
-});
+// Configurar la conexión a Supabase
+const supabaseUrl = process.env.SUPABASE_URL || 'TU_SUPABASE_URL';
+const supabaseKey = process.env.SUPABASE_KEY || 'TU_SUPABASE_KEY';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Endpoint de prueba
 app.get('/', (req, res) => {
-    res.send('Servidor funcionando correctamente');
+    res.send('Servidor funcionando correctamente con Supabase');
 });
 
 // Endpoint para eliminar un mensaje por su ID
-app.delete('/messages/:id', (req, res) => {
+app.delete('/messages/:id', async (req, res) => {
     const { id } = req.params;
-    db.run('DELETE FROM messages WHERE id = ?', function (err) {
-        if (err) {
-            console.error(err.message);
-            res.status(500).json({ error: 'Error al eliminar el mensaje' });
-            return;
+    try {
+        const { error } = await supabase.from('messages').delete().eq('id', id);
+        if (error) {
+            throw error;
         }
-        res.json({ message: 'Mensaje eliminado correctamente' })
-    })
-})
+        res.json({ message: 'Mensaje eliminado correctamente' });
+    } catch (err) {
+        console.error('Error al eliminar el mensaje:', err);
+        res.status(500).json({ error: 'Error al eliminar el mensaje.' });
+    }
+});
 
 // Endpoint para editar un mensaje por su ID
-app.put('/messages/:id', (req, res) => {
-    const { id } = req.params;
-    const { title, body } = req.body
-
-    if (!title || !body) {
-        return res.status(400).json({ error: 'El titulo y el cuerpo son obligatorios.' });
-    }
-
-    const query = `UPDATE messages SET title = ?, body = ? WHERE id = ?`;
-
-    db.run(query, [title, body, id], function (err) {
-        if (err) {
-            console.error('Error al actualizar el mensaje:', err);
-            return res.status(500).json({ error: 'Error al actualizar el mensaje.' });
-        }
-
-        if (this.changes === 0) {
-            return res.status(404).json({ error: 'Mensaje no encontrado' });
-        }
-
-        res.status(200).json({ id, title, body })
-    })
-})
-
-// Endpoint para crear un mensaje (POST/messages)
-app.post('/messages', (req, res) => {
-    const { title, body } = req.body;
-
-    if (!title || !body) {
-        return res.status(400).json({ error: 'El título y el cuerpo son obligatorios.' });
-    }
-
-    const query = `INSERT INTO messages (title, body) VALUES (?, ?)`;
-
-    db.run(query, [title, body], function (err) {
-        if (err) {
-            console.error('Error al crear el mensaje:', err);
-            return res.status(500).json({ error: 'Error al crear el mensaje.' });
-        }
-
-        res.status(201).json({ id: this.lastID, title, body });
-    });
-});
-
-// Endpoint para obtener todos los mensajes (GET/messages)
-app.get('/messages', (req, res) => {
-    const query = `SELECT * FROM messages ORDER BY created_at DESC`;
-
-    db.all(query, (err, rows) => {
-        if (err) {
-            console.error('Error al obtener los mensajes:', err);
-            return res.status(500).json({ error: 'Error al obtener los mensajes.' });
-        }
-
-        res.status(200).json(rows);
-    });
-});
-
-// Endpoint para actualizar un mensaje (PUT/messages/:id)
-app.put('/messages/:id', (req, res) => {
+app.put('/messages/:id', async (req, res) => {
     const { id } = req.params;
     const { title, body } = req.body;
 
@@ -104,44 +46,65 @@ app.put('/messages/:id', (req, res) => {
         return res.status(400).json({ error: 'El título y el cuerpo son obligatorios.' });
     }
 
-    const query = `UPDATE messages SET title = ?, body = ? WHERE id = ?`;
-
-    db.run(query, [title, body, id], function (err) {
-        if (err) {
-            console.error('Error al actualizar el mensaje:', err);
-            return res.status(500).json({ error: 'Error al actualizar el mensaje.' });
+    try {
+        const { data, error } = await supabase
+            .from('messages')
+            .update({ title, body })
+            .eq('id', id);
+        if (error) {
+            throw error;
         }
-
-        if (this.changes === 0) {
+        if (data.length === 0) {
             return res.status(404).json({ error: 'Mensaje no encontrado.' });
         }
-
-        res.status(200).json({ id, title, body });
-    });
+        res.status(200).json(data[0]);
+    } catch (err) {
+        console.error('Error al actualizar el mensaje:', err);
+        res.status(500).json({ error: 'Error al actualizar el mensaje.' });
+    }
 });
 
-// Endpoint para eliminar un mensaje (DELETE/messages/:id)
-app.delete('/messages/:id', (req, res) => {
-    const { id } = req.params;
+// Endpoint para crear un mensaje
+app.post('/messages', async (req, res) => {
+    const { title, body } = req.body;
 
-    const query = `DELETE FROM messages WHERE id = ?`;
+    if (!title || !body) {
+        return res.status(400).json({ error: 'El título y el cuerpo son obligatorios.' });
+    }
 
-    db.run(query, id, function (err) {
-        if (err) {
-            console.error('Error al eliminar el mensaje:', err);
-            return res.status(500).json({ error: 'Error al eliminar el mensaje.' });
+    try {
+        const { data, error } = await supabase
+            .from('messages')
+            .insert([{ title, body }]);
+        if (error) {
+            throw error;
         }
-
-        if (this.changes === 0) {
-            return res.status(404).json({ error: 'Mensaje no encontrado.' });
-        }
-
-        res.status(200).json({ message: 'Mensaje eliminado correctamente.' });
-    });
+        res.status(201).json(data[0]);
+    } catch (err) {
+        console.error('Error al crear el mensaje:', err);
+        res.status(500).json({ error: 'Error al crear el mensaje.' });
+    }
 });
 
+// Endpoint para obtener todos los mensajes
+app.get('/messages', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (error) {
+            throw error;
+        }
+        res.status(200).json(data);
+    } catch (err) {
+        console.error('Error al obtener los mensajes:', err);
+        res.status(500).json({ error: 'Error al obtener los mensajes.' });
+    }
+});
 
-// Escuchar el servidor
+// Iniciar el servidor
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
+fdsfds
